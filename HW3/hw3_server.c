@@ -122,25 +122,25 @@ int main(int argc, char *argv[])
                     else if (menu == 1)
                     {
                         printf("client %d sendList() \n", i);
-                        sendList(clnt_sock);
+                        sendList(i);
                     }
 
                     else if (menu == 2)
                     {
                         printf("client %d changeDir() \n", i);
-                        changeDir(clnt_sock);
+                        changeDir(i);
                     }
 
                     else if (menu == 3)
                     {
                         printf("client %d sendFile() \n", i);
-                        sendFile(clnt_sock);
+                        sendFile(i);
                     }
 
                     else if (menu == 4)
                     {
                         printf("client %d recvFile() \n", i);
-                        recvFile(clnt_sock);
+                        recvFile(i);
                     }
                 }
             }
