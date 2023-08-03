@@ -125,6 +125,7 @@ void showList(int sock)
     char message[BUF_SIZE];
     info_pkt_t *recv_pkt = malloc(sizeof(info_pkt_t));
 
+    printf("showList() recv before \n");
     // recieve # of file
     recvPkt(sock, message, BUF_SIZE);
     file_count = atoi(message);
@@ -338,7 +339,7 @@ int recvPkt(int sock, void *dest, int pkt_size)
     // memset(dest, 0, pkt_size);
     while (1)
     {
-        recv_size = recv(sock, temp, pkt_size, MSG_PEEK);
+        recv_size = recv(sock, temp, pkt_size, MSG_PEEK | MSG_DONTWAIT);
 
         if (recv_size == -1)
             perror("recv error : ");
