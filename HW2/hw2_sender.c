@@ -9,7 +9,7 @@
 #include <time.h>
 
 #define BUF_SIZE 1024
-#define filename "car.mpr4"
+#define filename "car.mp4"
 
 typedef struct
 {
