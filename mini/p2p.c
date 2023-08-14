@@ -1,35 +1,7 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <pthread.h>
+#include "p2ph.h"
 
-#define BUF_SIZE 1024
-#define MAX_CLNT 30
-
-typedef struct
-{
-    int *clnt_socks;
-    int serv_sock;
-    int num_accept;
-} accept_thread_t;
-
-typedef struct
-{
-    struct sockaddr_in *addr_info;
-    int *serv_socks;
-    int num_connect;
-} connect_thread_t;
-
-void setOption(int argc, char *argv[], char *option_type,
-               int *s_peer, int *r_peer, int *max_peer, char *file_name,
-               int *seg_size, char *s_peer_ip, char *s_peer_port, char *port);
-void showHelp(char *this_name);
 void sendingPeer(int max_peer, char *file_name, int seg_size, char *port);
 void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port);
-int recvPkt(int sock, void *dest, int pkt_size);
 void *acceptThread(void *arg);
 void *connectThread(void *arg);
 
@@ -67,8 +39,11 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
     int clnt_socks[MAX_CLNT];
     struct sockaddr_in addr_info[MAX_CLNT];
 
+    FILE *fp;
+
     printf("MAX_PEER is %d\n", max_peer);
-    printf("SEGMENT_SIZE is %d\n", seg_size);
+    seg_size *= 1024;
+    printf("SEGMENT_SIZE is %d [bytes]\n", seg_size);
 
     serv_sock = socket(PF_INET, SOCK_STREAM, 0);
     if (serv_sock == -1)
@@ -138,7 +113,7 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
     }
 
     printf("\n[Sender] p2p init complte ! \n");
-
+    // ----------------- part 2 -------------------
     while (1)
     {
     }
@@ -150,7 +125,7 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
 
 void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
 {
-    int sock, serv_sock;
+    int sock, serv_sock, sd_size;
     int num_connect, num_accept;
     int value;
     struct sockaddr_in serv_adr, serv_addr;
@@ -158,9 +133,10 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     // int clnt_adr_sz;
 
     // int clnt_count = 0;
-    int clnt_socks[MAX_CLNT];
-    int serv_socks[MAX_CLNT];
-    struct sockaddr_in addr_info[MAX_CLNT];
+    int *clnt_socks;
+    int *serv_socks;
+    int *socks;
+    struct sockaddr_in *addr_info;
 
     accept_thread_t accept_thread_arg;
     connect_thread_t connect_thread_arg;
@@ -216,6 +192,12 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     recvPkt(sock, &num_connect, sizeof(int));
     recvPkt(sock, &num_accept, sizeof(int));
 
+    sd_size = num_accept + num_connect;
+    socks = malloc(sizeof(int) * sd_size);
+    addr_info = malloc(sizeof(struct sockaddr_in) * num_connect);
+    clnt_socks = malloc(sizeof(int) * num_accept);
+    serv_socks = malloc(sizeof(int) * num_connect);
+
     printf("--- Ohter receiver Info ---\n");
     for (int i = 0; i < num_connect; i++)
     {
@@ -239,206 +221,39 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     pthread_join(accept_thread, NULL);
     pthread_join(connect_thread, NULL);
 
+    value = 0;
+    for (int i = 0; i < num_accept; i++)
+    {
+        socks[value] = clnt_socks[i];
+        value++;
+    }
+    for (int i = 0; i < num_connect; i++)
+    {
+        socks[value] = serv_socks[i];
+        value++;
+    }
+
+    printf("\n --- sock descripter list ---\n");
+    for (int i = 0; i < sd_size; i++)
+    {
+        printf("%d \n", socks[i]);
+    }
+
     printf("--- End Thread ---\n");
     printf("\n[Receiver] P2P init complete \n");
     value = 1;
     write(sock, &value, sizeof(int));
+    // ----------------------- part 2 ------------------------------
 
     while (1)
     {
     }
 
+    free(addr_info);
+    free(socks);
+    free(serv_socks);
+    free(clnt_socks);
     close(sock);
-}
-void showHelp(char *this_name)
-{
-    printf("Usage : %s [OPTION] [CONTENTS]\n"
-           "-s                            SET SENDING PEER\n"
-           "-r                            SET RECEIVING PEER\n"
-           "-n [ MAX_NUM ]                NUMBER of receving peer - for sending peer\n"
-           "-f [ FILE_NAME ]              FILE NAME to send\n"
-           "-g [ SEGMENT_SIZE [KB] ]      SEGMENT SIZE (KB)\n"
-           "-a [ <IP> <PORT> ]            IP and PORT for sending peer\n"
-           "-p [ PORT ]                   PORT for listen\n",
-           this_name);
-}
-
-void setOption(int argc, char *argv[], char *option_type,
-               int *s_peer, int *r_peer, int *max_peer, char *file_name,
-               int *seg_size, char *s_peer_ip, char *s_peer_port, char *port)
-{
-
-    int opt;
-
-    while ((opt = getopt(argc, argv, option_type)) != -1)
-    {
-        switch (opt)
-        {
-        case 'h':
-            showHelp(argv[0]);
-            break;
-
-        case 's':
-            *s_peer = 1;
-            printf("This process is sending peer\n");
-            break;
-
-        case 'r':
-            *r_peer = 1;
-            printf("This process is receiving peer\n");
-            break;
-
-        case 'n':
-            *max_peer = atoi(optarg);
-            if (*max_peer > MAX_CLNT)
-            {
-                printf("MAX_PEER limit is %d", MAX_CLNT);
-                exit(1);
-            }
-            break;
-
-        case 'f':
-            strcpy(file_name, optarg);
-            if (access(file_name, R_OK) != 0)
-            {
-                printf("%s does not exist or no permission\n", file_name);
-                exit(1);
-            }
-            break;
-
-        case 'g':
-            *seg_size = atoi(optarg);
-            break;
-
-        case 'a':
-            strcpy(s_peer_ip, optarg);
-            if (argv[optind][0] == '-')
-            {
-                printf("Inaccurate -a option\n");
-                exit(1);
-            }
-            strcpy(s_peer_port, argv[optind]);
-            optind++;
-            if (argv[optind][0] != '-')
-            {
-                printf("Inaccurate -a option\n");
-                exit(1);
-            }
-            break;
-
-        case 'p':
-            strcpy(port, optarg);
-            break;
-
-        case '?':
-            printf("unkown command\n");
-            showHelp(argv[0]);
-            exit(1);
-            break;
-        }
-    }
-
-    // IF TYPE NOT DEFINED
-    if ((*s_peer == 1) && (*r_peer == 1))
-    {
-        printf("TYPE NOT FIXED!! \n");
-        showHelp(argv[0]);
-        exit(1);
-    }
-
-    else if ((*s_peer == 0) && (*r_peer == 0))
-    {
-        printf("TYPE NOT FIXED!! \n");
-        showHelp(argv[0]);
-        exit(1);
-    }
-
-    // if sending peer
-    if (*s_peer == 1)
-    {
-        if (*max_peer == 0) // -n
-        {
-            printf("[SENDING PEER] -n option needed\n");
-
-            showHelp(argv[0]);
-            exit(1);
-        }
-
-        if (strcmp(file_name, "") == 0) // -f
-        {
-            printf("[SENDING PEER] -f option needed\n");
-
-            showHelp(argv[0]);
-            exit(1);
-        }
-
-        if (*seg_size == 0) // -g
-        {
-            printf("[SENDING PEER] -g option needed\n");
-
-            showHelp(argv[0]);
-            exit(1);
-        }
-
-        if (strcmp(port, "") == 0) // -p
-        {
-            printf("[SENDING PEER] -p option needed\n");
-
-            showHelp(argv[0]);
-            exit(1);
-        }
-    }
-
-    // if receiving peer
-    else if (*r_peer == 1)
-    {
-        if (strcmp(s_peer_ip, "") == 0) // -a
-        {
-            printf("[RECEVING PEER] -a option needed\n");
-
-            showHelp(argv[0]);
-            exit(1);
-        }
-
-        if (strcmp(s_peer_port, "") == 0) // -a
-        {
-            printf("[RECEVING PEER] -a option needed\n");
-
-            showHelp(argv[0]);
-            exit(1);
-        }
-
-        if (strcmp(port, "") == 0) // -p
-        {
-            printf("[RECEVING PEER] -p option needed\n");
-
-            showHelp(argv[0]);
-            exit(1);
-        }
-    }
-}
-
-int recvPkt(int sock, void *dest, int pkt_size)
-{
-    int recv_size;
-    char *temp = malloc(pkt_size);
-
-    while (1)
-    {
-        recv_size = recv(sock, temp, pkt_size, MSG_PEEK);
-
-        if (recv_size == -1)
-            perror("recv(): ");
-
-        if (recv_size == pkt_size)
-            break;
-    }
-
-    recv_size = recv(sock, temp, pkt_size, 0);
-    memcpy(dest, temp, pkt_size);
-
-    free(temp);
-    return recv_size;
 }
 
 void *acceptThread(void *arg)
