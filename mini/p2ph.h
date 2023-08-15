@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#include <time.h>
 
 #define BUF_SIZE 1024
 #define MAX_CLNT 30
@@ -111,6 +112,11 @@ void setOption(int argc, char *argv[], char *option_type,
 
         case 'g':
             *seg_size = atoi(optarg);
+            if (*seg_size * 1024 > 2147483646)
+            {
+                printf("overflow segment size \n");
+                exit(1);
+            }
             break;
 
         case 'a':
