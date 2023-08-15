@@ -5,6 +5,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port);
 void *FromReceiverThread(void *arg);
 void *FromSenderThread(void *arg);
 void *WriteFileThread(void *arg);
+void PrintSenderPercent(int file_total_size, int total_size, int id, int cur_size, double total_time_sec, double part_time_sec);
 
 typedef struct
 {
@@ -66,8 +67,6 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
     int clnt_count = 0;
     int clnt_socks[MAX_CLNT];
     struct sockaddr_in addr_info[MAX_CLNT];
-
-    FILE *fp;
 
     printf("MAX_PEER is %d\n", max_peer);
     seg_size *= 1024;
@@ -158,17 +157,55 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
     char *content = malloc(sizeof(char) * seg_size);
     int cur_size;
     int seq = 0;
+    int file_total_size = 0;
+    int total_size;
 
-    fp = fopen(file_name, "rb");
+    long long elapsed_ns;
+    double total_time_sec;
+    double part_time_sec;
+    FILE *fp = fopen(file_name, "rb");
+
+    fseek(fp, 0, SEEK_END);
+    file_total_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    // send file to receivers
+    struct timespec total_start_time, total_end_time;
+    struct timespec part_start_time, part_end_time;
+
+    for (int i = 0; i < max_peer + 1; i++)
+        printf("\n");
+    printf("\x1b[%dA\r", max_peer + 1);
+    fflush(stdout);
+
+    clock_gettime(CLOCK_MONOTONIC, &total_start_time);
     while ((cur_size = fread(content, 1, seg_size, fp)) > 0)
     {
+        clock_gettime(CLOCK_MONOTONIC, &part_start_time);
+
         write(clnt_socks[seq % max_peer], &seq, sizeof(int));
         write(clnt_socks[seq % max_peer], content, seg_size);
         write(clnt_socks[seq % max_peer], &cur_size, sizeof(int));
+        total_size += cur_size;
 
-        printf("seq : %d ID : %d cur_size : %d\n", seq, seq % max_peer, cur_size);
+        clock_gettime(CLOCK_MONOTONIC, &part_end_time);
+        elapsed_ns = (part_end_time.tv_sec - part_start_time.tv_sec) * 1000000000LL +
+                     (part_end_time.tv_nsec - part_start_time.tv_nsec);
+        part_time_sec = (double)elapsed_ns / 1000000000.0;
+
+        clock_gettime(CLOCK_MONOTONIC, &total_end_time);
+        elapsed_ns = (total_end_time.tv_sec - total_start_time.tv_sec) * 1000000000LL +
+                     (total_end_time.tv_nsec - total_start_time.tv_nsec);
+        total_time_sec = (double)elapsed_ns / 1000000000.0;
+
+        PrintSenderPercent(file_total_size, total_size, (seq % max_peer) + 1, cur_size, total_time_sec, part_time_sec);
+
         seq++;
     }
+
+    printf("\x1b[%dB\r", max_peer + 1);
+    printf("\n");
+    fflush(stdout);
 
     // send a signal to receivers for notice end
     for (int i = 0; i < max_peer; i++)
@@ -176,8 +213,7 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
         seq = -1;
         write(clnt_socks[i], &seq, sizeof(int));
     }
-
-    printf("[sender] Good Bye~\n");
+    printf("[Server] Good Bye\n");
 
     for (int i = 0; i < max_peer; i++)
         close(clnt_socks[i]);
@@ -349,7 +385,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
 
     // Join Part
     for (int i = 0; i < sd_size; i++)
-        pthread_join(write_file_thread, NULL);
+        pthread_join(from_receiver_thread[i], NULL);
     pthread_join(from_sender_thread, NULL);
     pthread_join(write_file_thread, NULL);
 
@@ -418,7 +454,11 @@ void *FromSenderThread(void *arg)
         {
             for (int i = 0; i < sd_size; i++)
                 write(socks[i], &seq, sizeof(int)); // send end condition to other reciever
-            break;                                  // end roop
+
+            pthread_mutex_lock(&print_mutex);
+            printf("[FS_Thread %d] before break\n", sock);
+            pthread_mutex_unlock(&print_mutex);
+            break; // end roop
         }
         recvPkt(sock, content, seg_size);
         recvPkt(sock, &cur_size, sizeof(int)); // given data from server
@@ -438,16 +478,6 @@ void *FromSenderThread(void *arg)
             write(socks[i], &cur_size, sizeof(int));
         }
     }
-
-    for (int i = 0; i < sd_size; i++)
-    {
-        seq = -1;
-        write(socks[i], &seq, sizeof(int));
-    }
-
-    pthread_mutex_lock(&linked_mutex);
-    printf("[FS_Thread] linked_size : %d\n", getSize(head));
-    pthread_mutex_unlock(&linked_mutex);
 
     return NULL;
 }
@@ -490,4 +520,37 @@ void *WriteFileThread(void *arg)
     }
 
     return NULL;
+}
+
+void PrintSenderPercent(int file_total_size, int total_size, int id, int cur_size, double total_time_sec, double part_time_sec)
+{
+    double completion_percentage = (double)total_size / file_total_size * 100;
+    int star_num = (int)(completion_percentage / 4);
+    double M = 1024 * 1024;
+    double total_throughput = (total_size / total_time_sec) / M;
+    double part_throughput = (cur_size / part_time_sec) / M;
+
+    usleep(1000 * 100);
+    printf("Sending Peer [");
+
+    for (int i = 0; i < star_num; i++)
+    {
+        printf("*");
+    }
+
+    for (int i = star_num; i < 25; i++)
+    {
+        printf(" ");
+    }
+
+    printf("] %.2f%%  (%d/%dBytes)  %fMbps  (%fs)", completion_percentage, total_size, file_total_size, total_throughput, total_time_sec);
+
+    printf("\x1b[%dB\r", id); // cusor down
+    fflush(stdout);
+
+    printf("To Receiving Peer #%d : %.1fMbps (%d Bytes Sent / %.6fs)", id, part_throughput, cur_size, part_time_sec);
+    printf("\x1b[%dA\r", id); // cusor up
+    fflush(stdout);
+
+    usleep(1000 * 100);
 }
