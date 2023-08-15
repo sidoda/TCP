@@ -2,8 +2,33 @@
 
 void sendingPeer(int max_peer, char *file_name, int seg_size, char *port);
 void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port);
-void *acceptThread(void *arg);
-void *connectThread(void *arg);
+void *FromReceiverThread(void *arg);
+void *FromSenderThread(void *arg);
+void *WriteFileThread(void *arg);
+
+typedef struct
+{
+    int sock;
+    int *socks;
+    int sd_size;
+    int seg_size;
+} from_sender_thread_t;
+
+typedef struct
+{
+    int sock;
+    int seg_size;
+} from_receiver_thread_t;
+
+typedef struct
+{
+    FILE *fp;
+    int seg_size;
+} write_file_thread_t;
+
+struct node *head = NULL;
+pthread_mutex_t linked_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t print_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int main(int argc, char *argv[])
 {
@@ -18,6 +43,9 @@ int main(int argc, char *argv[])
     setOption(argc, argv, option_type,
               &s_peer, &r_peer, &max_peer, file_name,
               &seg_size, s_peer_ip, s_peer_port, port);
+
+    pthread_mutex_init(&linked_mutex, NULL);
+    pthread_mutex_init(&print_mutex, NULL);
 
     if (s_peer == 1)
         sendingPeer(max_peer, file_name, seg_size, port);
@@ -52,6 +80,9 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
         exit(1);
     }
 
+    int optval = 1;
+    setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
     memset(&serv_adr, 0, sizeof(serv_adr));
     serv_adr.sin_family = AF_INET;
     serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -82,7 +113,7 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
         recvPkt(clnt_socks[i], &addr_info[i].sin_port, sizeof(u_short));
     }
 
-    printf("--- Clienct list ---\n");
+    printf("\n--- Clienct list ---\n");
     for (int i = 0; i < max_peer; i++)
     {
         printf("[Sender] socket number %d \n", clnt_socks[i]);
@@ -95,6 +126,9 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
         write(clnt_socks[i - 1], &value, sizeof(int));
         value = i - 1;
         write(clnt_socks[i - 1], &value, sizeof(int));
+        value = seg_size;
+        write(clnt_socks[i - 1], &value, sizeof(int));
+        write(clnt_socks[i - 1], file_name, BUF_SIZE);
 
         for (int j = i; j < max_peer; j++)
         {
@@ -112,11 +146,38 @@ void sendingPeer(int max_peer, char *file_name, int seg_size, char *port)
         }
     }
 
-    printf("\n[Sender] p2p init complte ! \n");
-    // ----------------- part 2 -------------------
-    while (1)
+    printf("\n--- sock descripter list ---\n");
+    for (int i = 0; i < max_peer; i++)
     {
+        printf("receiver %d : %d \n", i, clnt_socks[i]);
     }
+
+    printf("\n[Sender] p2p init complte ! \n\n");
+
+    // ----------------- part 2 -------------------
+    char *content = malloc(sizeof(char) * seg_size);
+    int cur_size;
+    int seq = 0;
+
+    fp = fopen(file_name, "rb");
+    while ((cur_size = fread(content, 1, seg_size, fp)) > 0)
+    {
+        write(clnt_socks[seq % max_peer], &seq, sizeof(int));
+        write(clnt_socks[seq % max_peer], content, seg_size);
+        write(clnt_socks[seq % max_peer], &cur_size, sizeof(int));
+
+        printf("seq : %d ID : %d cur_size : %d\n", seq, seq % max_peer, cur_size);
+        seq++;
+    }
+
+    // send a signal to receivers for notice end
+    for (int i = 0; i < max_peer; i++)
+    {
+        seq = -1;
+        write(clnt_socks[i], &seq, sizeof(int));
+    }
+
+    printf("[sender] Good Bye~\n");
 
     for (int i = 0; i < max_peer; i++)
         close(clnt_socks[i]);
@@ -128,20 +189,29 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     int sock, serv_sock, sd_size;
     int num_connect, num_accept;
     int value;
+    int seg_size;
     struct sockaddr_in serv_adr, serv_addr;
     u_short listen_port = htons(atoi(port));
-    // int clnt_adr_sz;
 
-    // int clnt_count = 0;
     int *clnt_socks;
     int *serv_socks;
     int *socks;
     struct sockaddr_in *addr_info;
+    char file_name[BUF_SIZE];
 
     accept_thread_t accept_thread_arg;
     connect_thread_t connect_thread_arg;
     pthread_t accept_thread;
     pthread_t connect_thread;
+
+    from_sender_thread_t from_sender_thread_arg;
+    from_receiver_thread_t *from_receiver_thread_arg;
+    pthread_t from_sender_thread;
+    pthread_t *from_receiver_thread;
+
+    write_file_thread_t write_file_thread_arg;
+    pthread_t write_file_thread;
+    FILE *fp;
 
     // sock to connect with sender
     sock = socket(PF_INET, SOCK_STREAM, 0);
@@ -173,6 +243,9 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
         exit(1);
     }
 
+    int optval = 1;
+    setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
     memset(&serv_adr, 0, sizeof(serv_adr));
     serv_adr.sin_family = AF_INET;
     serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -191,6 +264,8 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     // receive other receiver ip and port from server
     recvPkt(sock, &num_connect, sizeof(int));
     recvPkt(sock, &num_accept, sizeof(int));
+    recvPkt(sock, &seg_size, sizeof(int)); // seg_size
+    recvPkt(sock, file_name, BUF_SIZE);
 
     sd_size = num_accept + num_connect;
     socks = malloc(sizeof(int) * sd_size);
@@ -234,21 +309,55 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     }
 
     printf("\n --- sock descripter list ---\n");
+    printf("sender : %d\n", sock);
+    printf("listen : %d\n", serv_sock);
     for (int i = 0; i < sd_size; i++)
     {
-        printf("%d \n", socks[i]);
+        printf("receiver : %d \n", socks[i]);
     }
 
     printf("--- End Thread ---\n");
-    printf("\n[Receiver] P2P init complete \n");
     value = 1;
     write(sock, &value, sizeof(int));
+    printf("\n[Receiver] P2P init complete \n");
+
     // ----------------------- part 2 ------------------------------
 
-    while (1)
+    // From Sender Thread
+    from_sender_thread_arg.sock = sock;
+    from_sender_thread_arg.socks = socks;
+    from_sender_thread_arg.sd_size = sd_size;
+    from_sender_thread_arg.seg_size = seg_size;
+    pthread_create(&from_sender_thread, NULL, FromSenderThread, (void *)&from_sender_thread_arg);
+
+    // From Receiver Thread
+    from_receiver_thread = malloc(sizeof(pthread_t) * sd_size);
+    from_receiver_thread_arg = malloc(sizeof(from_receiver_thread_t) * sd_size);
+
+    for (int i = 0; i < sd_size; i++)
     {
+        from_receiver_thread_arg[i].sock = socks[i];
+        from_receiver_thread_arg[i].seg_size = seg_size;
+        pthread_create(&from_receiver_thread[i], NULL, FromReceiverThread, (void *)&from_receiver_thread_arg[i]);
     }
 
+    // File Write Trhead
+    fp = fopen(file_name, "wb");
+    write_file_thread_arg.fp = fp;
+    write_file_thread_arg.seg_size = seg_size;
+    pthread_create(&write_file_thread, NULL, WriteFileThread, (void *)&write_file_thread_arg);
+
+    // Join Part
+    for (int i = 0; i < sd_size; i++)
+        pthread_join(write_file_thread, NULL);
+    pthread_join(from_sender_thread, NULL);
+    pthread_join(write_file_thread, NULL);
+
+    printf("[Receiver] Good Bye~\n");
+
+    // Deallocate Part
+    free(from_receiver_thread_arg);
+    free(from_receiver_thread);
     free(addr_info);
     free(socks);
     free(serv_socks);
@@ -256,54 +365,129 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     close(sock);
 }
 
-void *acceptThread(void *arg)
+void *FromReceiverThread(void *arg)
 {
-    accept_thread_t *accept_thread_arg = (accept_thread_t *)arg;
-    struct sockaddr_in clnt_adr;
-    socklen_t clnt_adr_sz;
+    from_receiver_thread_t *from_receiver_thread_arg = (from_receiver_thread_t *)arg;
+    int sock = from_receiver_thread_arg->sock;
+    int seg_size = from_receiver_thread_arg->seg_size;
 
-    int *clnt_socks;
-    int serv_sock;
-    int num_accept;
+    int seq;
+    int cur_size;
+    char *content = malloc(sizeof(char) * seg_size);
 
-    clnt_socks = accept_thread_arg->clnt_socks;
-    serv_sock = accept_thread_arg->serv_sock;
-    num_accept = accept_thread_arg->num_accept;
+    pthread_mutex_lock(&print_mutex);
+    printf("[FR_Thread %d] Init \n", sock);
+    pthread_mutex_unlock(&print_mutex);
 
-    for (int i = 0; i < num_accept; i++)
+    while (1)
     {
-        clnt_adr_sz = sizeof(clnt_adr);
-        clnt_socks[i] = accept(serv_sock, (struct sockaddr *)&clnt_adr, &clnt_adr_sz);
-        printf("[Accept Thread] %d connected \n", clnt_socks[i]);
-    }
+        recvPkt(sock, &seq, sizeof(int));
+        if (seq == -1)
+            break;
+        recvPkt(sock, content, seg_size);
+        recvPkt(sock, &cur_size, sizeof(int));
 
-    printf("[Accept Thread] end \n");
+        pthread_mutex_lock(&print_mutex);
+        printf("[FR_thread %d] seq : %d cur_size : %d\n", sock, seq, cur_size);
+        pthread_mutex_unlock(&print_mutex);
+
+        pthread_mutex_lock(&linked_mutex);
+        insert(&head, newNode(seq, content, cur_size));
+        pthread_mutex_unlock(&linked_mutex);
+    }
 
     return NULL;
 }
-void *connectThread(void *arg)
+
+void *FromSenderThread(void *arg)
 {
-    connect_thread_t *connect_thread_arg = (connect_thread_t *)arg;
-    struct sockaddr_in *addr_info;
-    int *serv_socks;
-    int num_connect;
+    from_sender_thread_t *from_sender_thread_arg = (from_sender_thread_t *)arg;
+    int sock = from_sender_thread_arg->sock;
+    int *socks = from_sender_thread_arg->socks;
+    int sd_size = from_sender_thread_arg->sd_size;
+    int seg_size = from_sender_thread_arg->seg_size;
 
-    addr_info = connect_thread_arg->addr_info;
-    serv_socks = connect_thread_arg->serv_socks;
-    num_connect = connect_thread_arg->num_connect;
+    int seq;
+    int cur_size;
+    char *content = malloc(sizeof(char) * seg_size);
 
-    for (int i = 0; i < num_connect; i++)
+    while (1)
     {
-        serv_socks[i] = socket(PF_INET, SOCK_STREAM, 0);
-        if (connect(serv_socks[i], (struct sockaddr *)&addr_info[i], sizeof(addr_info[i])) == -1)
+        recvPkt(sock, &seq, sizeof(int));
+        if (seq == -1)
         {
-            perror("[Connect Thread] connect() error : ");
-            exit(1);
+            for (int i = 0; i < sd_size; i++)
+                write(socks[i], &seq, sizeof(int)); // send end condition to other reciever
+            break;                                  // end roop
         }
-        printf("[Connect Thread] Connected IP : %s PORT : %d \n", inet_ntoa(addr_info[i].sin_addr), ntohs(addr_info[i].sin_port));
+        recvPkt(sock, content, seg_size);
+        recvPkt(sock, &cur_size, sizeof(int)); // given data from server
+
+        pthread_mutex_lock(&print_mutex);
+        printf("[FS_Thread %d] seq : %d cur_size : %d \n", sock, seq, cur_size);
+        pthread_mutex_unlock(&print_mutex);
+
+        pthread_mutex_lock(&linked_mutex);
+        insert(&head, newNode(seq, content, cur_size)); // save to linked list
+        pthread_mutex_unlock(&linked_mutex);
+
+        for (int i = 0; i < sd_size; i++) // send data to other reciever
+        {
+            write(socks[i], &seq, sizeof(int));
+            write(socks[i], content, seg_size);
+            write(socks[i], &cur_size, sizeof(int));
+        }
     }
 
-    printf("[Connect Thread] end \n");
+    for (int i = 0; i < sd_size; i++)
+    {
+        seq = -1;
+        write(socks[i], &seq, sizeof(int));
+    }
+
+    pthread_mutex_lock(&linked_mutex);
+    printf("[FS_Thread] linked_size : %d\n", getSize(head));
+    pthread_mutex_unlock(&linked_mutex);
+
+    return NULL;
+}
+
+void *WriteFileThread(void *arg)
+{
+
+    write_file_thread_t *write_file_thread_arg = (write_file_thread_t *)arg;
+    int cur_seq = 0;
+    int cur_size = 0;
+    FILE *fp = write_file_thread_arg->fp;
+    int seg_size = write_file_thread_arg->seg_size;
+
+    while (1)
+    {
+        pthread_mutex_lock(&linked_mutex);
+        if (cur_seq == getTopSeq(head))
+        {
+
+            cur_size = head->data.cur_size;
+            fwrite(head->data.content, 1, cur_size, fp);
+
+            pthread_mutex_lock(&print_mutex);
+            printf("[FW_Thread] %d saved %d %d\n", cur_seq, cur_size, seg_size);
+            pthread_mutex_unlock(&print_mutex);
+
+            delete (&head);
+            cur_seq++;
+
+            if (cur_size < seg_size)
+                break;
+
+            pthread_mutex_unlock(&linked_mutex);
+        }
+        else
+        {
+            pthread_mutex_unlock(&linked_mutex);
+            usleep(1000 * 200);
+        }
+    }
 
     return NULL;
 }
