@@ -326,6 +326,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     clnt_socks = malloc(sizeof(int) * num_accept);
     serv_socks = malloc(sizeof(int) * num_connect);
 
+    printf("[Receiver %d IP : %s PORT : %d ]\n", id, inet_ntoa(serv_adr.sin_addr), ntohs(serv_adr.sin_port));
     printf("--- Ohter receiver Info ---\n");
     for (int i = 0; i < num_connect; i++)
     {
@@ -603,6 +604,7 @@ void PrintSenderPercent(long total_file_size, int total_size, int id, int cur_si
     double total_throughput = (total_size / total_time_sec) / M;
     double part_throughput = (cur_size / part_time_sec) / M;
 
+    printf("\033[K"); // clear line
     printf("Sending Peer [");
 
     for (int i = 0; i < star_num; i++)
@@ -620,6 +622,7 @@ void PrintSenderPercent(long total_file_size, int total_size, int id, int cur_si
     printf("\x1b[%dB\r", id); // cusor down
     fflush(stdout);
 
+    printf("\033[K"); // clear line
     printf("To Receiving Peer #%d : %.1f Mbps (%d Bytes Sent / %.6f s) ", id, part_throughput, cur_size, part_time_sec);
     printf("\x1b[%dA\r", id); // cusor up
     fflush(stdout);
@@ -635,6 +638,7 @@ void PrintReceiverPercentS(long total_file_size, int total_size, int my_id, int 
     double total_throughput = (total_size / total_time_sec) / M;
     double part_throughput = (cur_size / part_time_sec) / M;
 
+    printf("\033[K"); // clear line
     printf("Receiving Peer %d [", my_id);
 
     for (int i = 0; i < star_num; i++)
@@ -651,6 +655,7 @@ void PrintReceiverPercentS(long total_file_size, int total_size, int my_id, int 
     printf("\x1b[%dB\r", 1); // cusor down
     fflush(stdout);
 
+    printf("\033[K"); // clear line
     printf("From Sending Peer : %.1f Mbps (%d Bytes Sent / %.6f s)", part_throughput, cur_size, part_time_sec);
     printf("\x1b[%dA\r", 1); // cusor up
     fflush(stdout);
@@ -666,6 +671,7 @@ void PrintReceiverPercentR(long total_file_size, int total_size, int my_id, int 
     double total_throughput = (total_size / total_time_sec) / M;
     double part_throughput = (cur_size / part_time_sec) / M;
 
+    printf("\033[K"); // clear line
     printf("Receiving Peer %d [", my_id);
 
     for (int i = 0; i < star_num; i++)
@@ -682,6 +688,7 @@ void PrintReceiverPercentR(long total_file_size, int total_size, int my_id, int 
     printf("\x1b[%dB\r", position + 2); // cusor down
     fflush(stdout);
 
+    printf("\033[K"); // clear line
     printf("From Receiving Peer #%d : %.1f Mbps (%d Bytes Sent / %.6f s)", id, part_throughput, cur_size, part_time_sec);
     printf("\x1b[%dA\r", position + 2); // cusor up
     fflush(stdout);
