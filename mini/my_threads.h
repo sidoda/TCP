@@ -1,5 +1,5 @@
-#ifndef _MY_THREADS_H
-#define _MY_THREADS_H
+#ifndef __MY_THREADS_H__
+#define __MY_THREADS_H__
 
 #include "linked_list.h"
 #include <stdio.h>
@@ -55,12 +55,12 @@ typedef struct
     int seg_size;
 } write_file_thread_t;
 
-struct node *head = NULL;
-pthread_mutex_t linked_mutex = PTHREAD_MUTEX_INITIALIZER;
+extern struct node *head;
+extern pthread_mutex_t linked_mutex;
 
-int receiver_total_size;
-struct timespec total_start_time, total_end_time;
-struct timespec part_start_time, part_end_time;
+extern int receiver_total_size;
+extern struct timespec total_start_time, total_end_time;
+extern struct timespec part_start_time, part_end_time;
 
 int recvPkt(int sock, void *dest, int pkt_size);
 
@@ -270,7 +270,7 @@ void *WriteFileThread(void *arg)
         else
         {
             pthread_mutex_unlock(&linked_mutex);
-            usleep(1000 * 200);
+            usleep(1000 * 300);
         }
     }
 
@@ -309,7 +309,7 @@ void PrintSenderPercent(long total_file_size, int total_size, int id, int cur_si
     printf("\x1b[%dA\r", id); // cusor up
     fflush(stdout);
 
-    usleep(1000 * 100);
+    usleep(1000 * 30);
 }
 void PrintReceiverPercentS(long total_file_size, int total_size, int my_id, int cur_size, double total_time_sec, double part_time_sec)
 {
@@ -341,7 +341,7 @@ void PrintReceiverPercentS(long total_file_size, int total_size, int my_id, int 
     printf("\x1b[%dA\r", 1); // cusor up
     fflush(stdout);
 
-    usleep(1000 * 100);
+    usleep(1000 * 30);
 }
 void PrintReceiverPercentR(long total_file_size, int total_size, int my_id, int id, int cur_size, double total_time_sec, double part_time_sec, int position)
 {
@@ -373,7 +373,7 @@ void PrintReceiverPercentR(long total_file_size, int total_size, int my_id, int 
     printf("\x1b[%dA\r", position + 2); // cusor up
     fflush(stdout);
 
-    usleep(1000 * 100);
+    usleep(1000 * 30);
 }
 
 int recvPkt(int sock, void *dest, int pkt_size)
