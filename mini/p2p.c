@@ -1,14 +1,11 @@
 #include "my_threads.h"
 
-typedef struct
-{
-    int num_connect;
-    int num_accept;
-    int seg_size;
-    char file_name[BUF_SIZE];
-    int id;
-    long total_file_size;
-} s2r_pkt_t;
+struct node *head = NULL;
+pthread_mutex_t linked_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int receiver_total_size;
+struct timespec total_start_time, total_end_time;
+struct timespec part_start_time, part_end_time;
 
 void setOption(int argc, char *argv[], char *option_type,
                int *s_peer, int *r_peer, int *max_peer, char *file_name,
@@ -40,6 +37,7 @@ int main(int argc, char *argv[])
     else
         receivingPeer(s_peer_port, s_peer_ip, port);
 
+    pthread_mutex_destroy(&linked_mutex);
     return 0;
 }
 
@@ -261,7 +259,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     printf("Connected with sender \n");
     write(sock, &listen_port, sizeof(u_short)); // send listen port
 
-    // sock to connect with other recevier
+    // listening sock
     serv_sock = socket(PF_INET, SOCK_STREAM, 0);
     if (serv_sock == -1)
     {
@@ -296,6 +294,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     recvPkt(sock, &id, sizeof(int));               // id
     recvPkt(sock, &total_file_size, sizeof(long)); // total_file_size
 
+    // allocate part
     sd_size = num_accept + num_connect;
     socks = malloc(sizeof(int) * sd_size);
     ids = malloc(sizeof(int) * sd_size);
@@ -346,7 +345,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
 
     // ----------------------- part 2 ------------------------------
 
-    // exchange id with each other
+    // exchange ID
     for (int i = 0; i < sd_size; i++)
         write(socks[i], &id, sizeof(int));
     for (int i = 0; i < sd_size; i++)
@@ -361,7 +360,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     }
     printf("\n");
 
-    // timer and terminal cursor control
+    // timer and console cursor control
     for (int i = 0; i < sd_size + 2; i++)
         printf("\n");
     printf("\x1b[%dA\r", sd_size + 2);
@@ -395,7 +394,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
         pthread_create(&from_receiver_thread[i], NULL, FromReceiverThread, (void *)&from_receiver_thread_arg[i]);
     }
 
-    // File Write Trhead
+    // File Write Thread
     fp = fopen(file_name, "wb");
     write_file_thread_arg.fp = fp;
     write_file_thread_arg.seg_size = seg_size;
@@ -420,6 +419,7 @@ void receivingPeer(char *s_peer_port, char *s_peer_ip, char *port)
     free(socks);
     free(serv_socks);
     free(clnt_socks);
+    close(serv_sock);
     close(sock);
 }
 
